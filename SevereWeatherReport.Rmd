@@ -1,0 +1,150 @@
+---
+title: "Impact of Severe Weather Events"
+author: "Alex Robinson"
+date: "30 June 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+Using data from the U.S. National Oceanic and Atmospheric Administration's
+(NOAA) storm database an investigation of the economic and health effects of
+severe weather events has been undertaken.
+
+Adding together the number of reported fatalities and injuries to give an 
+overall casualty figure showed **tornadoes** as by far the most injurious type of
+event.
+
+Adding together the crop and property damage figures to give an overall cost 
+figure showed **flooding** to be the most costly event type.
+
+## Data Processing
+
+The data for this study is available here:
+
+https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+
+and information on the data is available here:
+
+https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf
+
+```{r read_data, cache=TRUE}
+src.data <- "./repdata%2Fdata%2FStormData.csv.bz2"
+if(file.exists(src.data)){
+        storm.data <- read.csv(src.data)
+}
+```
+
+To process the data a small amount of data cleansing was undertaken to standardise
+capitalisation where possible and to remove "/" characters from the event type
+again to standardise the names.
+
+*This study would benefit from a more thorough data cleanse and standardisation
+effort. There remain a number of events that will be miscounted due to 
+inconsistent classification.*
+
+Those events with either fatalities or injuries were separated out and given a
+total casualty figure by summing the fatalities and injury numbers.
+
+The events where property or crop damage were reported were assigned to a 
+separate data.frame and an attempt at providing a total damage cost was made.
+
+This was done by examining the PROPDMG (and PROPDMGEXP) and CROPDMG 
+(and CROPDMGEXP) values. The DMG figures were mutliplied by a value based on its
+EXP field (K = 1, M = 1000, B = 1000000) to give a value in 1000's of dollars. 
+These values were then summed.
+
+*Where the EXP column was not K, M or B the figures were not included in the
+calculation.*
+
+
+``` {r process_data}
+## tidy up some of the event type data
+storm.data$EVTYPE <- toupper(storm.data$EVTYPE)
+storm.data$EVTYPE <- gsub("/", " ", storm.data$EVTYPE)
+storm.data$EVTYPE[grep("THUNDER", storm.data$EVTYPE)] <- "THUNDERSTORM"
+storm.data$EVTYPE[grep("TSTM", storm.data$EVTYPE)] <- "THUNDERSTORM"
+storm.data$EVTYPE[storm.data$EVTYPE == "AVALANCE"] <- "AVALANCHE"
+## for more accuracy this data cleanse activity should be extended
+
+## Also standardise the EXP data as much as possible
+storm.data$CROPDMGEXP <- toupper(storm.data$CROPDMGEXP)
+storm.data$PROPDMGEXP <- toupper(storm.data$PROPDMGEXP)
+
+## extract only those cases where people were injured or killed
+casualty.data <- storm.data[storm.data$FATALITIES > 0 | storm.data$INJURIES > 0, ]
+casualty.data["CASUALTIES"] <- casualty.data$FATALITIES + casualty.data$INJURIES
+
+## extract those cases where some econommic damage was incurred
+expense.data <- storm.data[storm.data$PROPDMG > 0 | storm.data$CROPDMG > 0, ]
+expense.data["PROPDMGX"] <- 0
+expense.data["CROPDMGX"] <- 0
+## Turn the EXP information into a figure for multiplication to 1000's
+## so K = 1, M = 1,000, B = 1,000,000 anything else will be codified as 0
+expense.data$PROPDMGX[expense.data$PROPDMGEXP == "K"] <- 1
+expense.data$PROPDMGX[expense.data$PROPDMGEXP == "M"] <- 1000
+expense.data$PROPDMGX[expense.data$PROPDMGEXP == "B"] <- 1000000
+expense.data$CROPDMGX[expense.data$CROPDMGEXP == "K"] <- 1
+expense.data$CROPDMGX[expense.data$CROPDMGEXP == "M"] <- 1000
+expense.data$CROPDMGX[expense.data$CROPDMGEXP == "B"] <- 1000000
+## Multiply the damage figures by these multipliers
+expense.data["PROPDMGTOT"] <- expense.data$PROPDMG * expense.data$PROPDMGX
+expense.data["CROPDMGTOT"] <- expense.data$CROPDMG * expense.data$CROPDMGX
+expense.data["DMGTOT"] <- 0
+## For the total add the 2 figures together
+expense.data$DMGTOT <- expense.data$PROPDMGTOT + expense.data$CROPDMGTOT
+
+```
+## Results
+
+### Casualty Data
+
+The event types and the total number of casualties for the 5 most injurious
+events are shown below.
+
+Tornadoes account for by far the most reported injuries
+
+```{r casualty_results}
+casualty.events <- aggregate(CASUALTIES ~ EVTYPE, data = casualty.data, FUN = sum)
+
+casualty.events <- casualty.events[order(-casualty.events$CASUALTIES),]
+names(casualty.events) <- c("Event Type", "Casualties")
+casualty.events <- head(casualty.events)
+format(casualty.events, big.mark = ",")
+
+```
+
+```{r casualty_plot}
+barplot(casualty.events$Casualties, names.arg = casualty.events$`Event Type`,
+        cex.names = 0.5, col = "sienna", main = "Total Casualties by Event Type")
+```
+
+### Expense Data
+
+The event types and the total cost of damages for the 5 most costly events types 
+are shown below.
+
+Flooding accounts for the highest cost of damage to crops and property with
+hurricane/typhoon second.
+
+```{r expense_results}
+expense.events <- aggregate(DMGTOT ~ EVTYPE, data = expense.data, FUN = sum)
+
+expense.events <- expense.events[order(-expense.events$DMGTOT),]
+names(expense.events) <- c("Event Type", "Total Damage in $Ks")
+expense.events <- head(expense.events)
+format(expense.events, big.mark = ",")
+
+```
+
+```{r expense_plot}
+barplot(expense.events$`Total Damage in $Ks`, names.arg = expense.events$`Event Type`,
+        cex.names = 0.5, col = "chartreuse4", axes = FALSE)
+pts <- pretty(expense.events$`Total Damage in $Ks` / 1000000)
+axis(2, at = pretty(expense.events$`Total Damage in $Ks`), labels = pts)
+title(ylab = "Total damage in Billions $", main = "Economic Impact of Events")
+```
